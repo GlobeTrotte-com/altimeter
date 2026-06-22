@@ -25,6 +25,28 @@ export class AltimeterDestination {
   }
 }
 
+/**
+ * Joins a base URL and a path, inserting a single "/" separator only when
+ * both sides are non-empty and the base does not already end with one.
+ */
+export function joinURL(baseURL: string, path: string): string {
+  if (baseURL.length > 0 && path.length > 0 && !baseURL.endsWith("/")) {
+    return baseURL + "/" + path;
+  }
+  return baseURL + path;
+}
+
+/**
+ * Ensures a directory string ends with a trailing "/" so file names can be
+ * appended directly. Empty strings are left untouched.
+ */
+export function normalizeDir(dir: string): string {
+  if (dir.length > 0 && !dir.endsWith("/")) {
+    return dir + "/";
+  }
+  return dir;
+}
+
 export async function genRun(config: AltimeterConfig): Promise<void> {
   let browser: Browser;
   switch (config.browser) {
@@ -69,10 +91,7 @@ async function genScreenShot(
     console.error("`baseURL` cannot be `undefined`.");
     process.exit(1);
   }
-  let baseURL = config.baseURL;
-  if (baseURL.length > 0 && path.length > 0 && !baseURL.endsWith("/")) {
-    baseURL += "/";
-  }
+  const baseURL = config.baseURL;
 
   const env = await browser.newContext({
     baseURL: baseURL,
@@ -84,13 +103,10 @@ async function genScreenShot(
     isMobile: false,
   });
   const page = await env.newPage();
-  await page.goto(baseURL + path);
+  await page.goto(joinURL(baseURL, path));
   await page.waitForLoadState("networkidle");
 
-  let dir = config.dir;
-  if (dir.length > 0 && !dir.endsWith("/")) {
-    dir += "/";
-  }
+  const dir = normalizeDir(config.dir);
 
   await page.screenshot({
     animations: "disabled",

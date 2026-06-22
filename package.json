@@ -11,9 +11,11 @@
     "bin"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc && npm run esbuild",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && npm run esbuild",
     "esbuild": "esbuild --bundle --platform=node --packages=external ./cli.ts ./index.ts --outdir=dist --allow-overwrite",
     "lint": "eslint \"**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build && ./bin/cli.js doc/config.json",
     "postinstall": "npx playwright install"
   },
@@ -30,7 +32,8 @@
     "esbuild": "0.28.1",
     "eslint": "10.5.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.61.1"
+    "typescript-eslint": "8.61.1",
+    "vitest": "4.1.9"
   },
   "license": "MIT"
 }
