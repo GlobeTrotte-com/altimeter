@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

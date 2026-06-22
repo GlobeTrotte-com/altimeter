@@ -1,0 +1,36 @@
+{
+  "name": "@globetrotte/altimeter",
+  "version": "0.0.4",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "altimeter": "bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc && npm run esbuild",
+    "esbuild": "esbuild --bundle --platform=node --packages=external ./cli.ts ./index.ts --outdir=dist --allow-overwrite",
+    "lint": "eslint \"**/*.ts\"",
+    "prepublishOnly": "npm run build && ./bin/cli.js doc/config.json",
+    "postinstall": "npx playwright install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GlobeTrotte-com/altimeter.git"
+  },
+  "keywords": ["altimeter", "preview", "screenshot", "link", "image"],
+  "dependencies": {
+    "playwright-core": "1.61.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.0",
+    "esbuild": "0.28.1",
+    "eslint": "10.5.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.61.1"
+  },
+  "license": "MIT"
+}
