@@ -4,10 +4,12 @@ import {
   AltimeterConfigError,
   AltimeterDestination,
   BrowserTypes,
+  destinationName,
   joinURL,
   mapWithConcurrency,
   normalizeDir,
   parseConfig,
+  screenshotStyle,
 } from "./index";
 
 describe("joinURL", () => {
@@ -54,7 +56,13 @@ describe("AltimeterConfig", () => {
     expect(config.destURLs).toEqual([]);
     expect(config.dir).toBe("altimeter");
     expect(config.width).toBe(1200);
-    expect(config.height).toBe(600);
+    expect(config.height).toBe(630);
+    expect(config.deviceScaleFactor).toBe(1);
+    expect(config.format).toBe("jpeg");
+    expect(config.quality).toBeUndefined();
+    expect(config.colorScheme).toBe("light");
+    expect(config.reducedMotion).toBe("reduce");
+    expect(config.hideSelectors).toEqual([]);
     expect(config.waitUntil).toBe("load");
     expect(config.waitForSelector).toBeUndefined();
     expect(config.delay).toBe(0);
@@ -137,14 +145,22 @@ describe("parseConfig", () => {
         destURLs: [
           { name: "a", url: "a.html" },
           { name: "a", url: "b.html" },
-          { url: "c.html" },
-          "d.html",
+          "docs/c.html",
+          { url: "docs/c" },
+          { name: "", url: "e.html" },
+          { name: "f" },
+          42,
+          { url: "g.html", width: -1, format: "gif" },
         ],
       }),
     ).toEqual([
-      "`destURLs[1]`.name `a` is used more than once",
-      "`destURLs[2]`.name must be a non-empty string",
-      "`destURLs[3]` must be an object with `name` and `url`",
+      "`destURLs[1]` would be saved as `a`, which is already used; give it a unique `name`",
+      "`destURLs[3]` would be saved as `docs-c`, which is already used; give it a unique `name`",
+      "`destURLs[4].name` must be a non-empty string",
+      "`destURLs[5].url` must be a string",
+      "`destURLs[6]` must be a string or an object",
+      "`destURLs[7].width` must be a positive integer",
+      '`destURLs[7].format` must be one of "jpeg", "png"',
     ]);
   });
 
@@ -157,6 +173,37 @@ describe("parseConfig", () => {
     expect(warnings).toEqual([
       "Unknown config key `Width`, did you mean `width`?",
       "Unknown config key `colour`.",
+    ]);
+  });
+
+  it("warns about keys that cannot be set per destination", () => {
+    const warnings: string[] = [];
+    parseConfig(
+      {
+        baseURL: "https://gitnav.xyz",
+        destURLs: [{ url: "a.html", browser: "firefox" }],
+      },
+      (w) => warnings.push(w),
+    );
+    expect(warnings).toEqual(["Unknown config key `destURLs[0].browser`."]);
+  });
+
+  it("validates the new page options", () => {
+    expect(
+      problemsOf({
+        baseURL: "https://gitnav.xyz",
+        quality: 101,
+        deviceScaleFactor: 0,
+        hideSelectors: ".banner",
+        headers: { "X-Token": 1 },
+        httpCredentials: { username: "me" },
+      }),
+    ).toEqual([
+      "`quality` must be an integer from 0 to 100",
+      "`deviceScaleFactor` must be a positive number",
+      "`hideSelectors` must be an array of non-empty strings",
+      "`headers` must be an object with string values",
+      "`httpCredentials` must be an object with string `username` and `password`",
     ]);
   });
 });
@@ -178,5 +225,39 @@ describe("mapWithConcurrency", () => {
 
   it("handles an empty list", async () => {
     expect(await mapWithConcurrency([], 4, async (n) => n)).toEqual([]);
+  });
+});
+
+describe("destinationName", () => {
+  it.each([
+    ["", "base"],
+    ["/", "base"],
+    ["index.html", "base"],
+    ["docs/drag-and-drop-rebase.html", "docs-drag-and-drop-rebase"],
+    ["docs/", "docs"],
+    ["docs/index.html", "docs"],
+    ["/blog/post?id=1#top", "blog-post"],
+    ["about.htm", "about"],
+    ["snake_case", "snake_case"],
+  ])("derives %j -> %j", (url, name) => {
+    expect(destinationName(url)).toBe(name);
+  });
+});
+
+describe("screenshotStyle", () => {
+  it("returns undefined when there is nothing to apply", () => {
+    expect(screenshotStyle({ hideSelectors: [] })).toBeUndefined();
+    expect(screenshotStyle({ hideSelectors: [], css: "" })).toBeUndefined();
+  });
+
+  it("hides selectors and appends custom css", () => {
+    expect(
+      screenshotStyle({
+        hideSelectors: ["#cookies", ".chat"],
+        css: "body { margin: 0; }",
+      }),
+    ).toBe(
+      "#cookies, .chat { visibility: hidden !important; }\nbody { margin: 0; }",
+    );
   });
 });
