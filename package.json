@@ -6,6 +6,9 @@
   "bin": {
     "altimeter": "bin/cli.js"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
     "dist",
     "bin"
@@ -16,8 +19,7 @@
     "lint": "eslint \"**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build && ./bin/cli.js doc/config.json",
-    "postinstall": "npx playwright install"
+    "prepublishOnly": "npm run build && ./bin/cli.js doc/config.json"
   },
   "repository": {
     "type": "git",
