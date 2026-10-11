@@ -16,28 +16,53 @@ export enum BrowserTypes {
 }
 
 export type WaitUntil = "load" | "domcontentloaded" | "networkidle" | "commit";
+export type ImageFormat = "jpeg" | "png";
+export type ColorScheme = "light" | "dark" | "no-preference";
+export type ReducedMotion = "reduce" | "no-preference";
 
-export class AltimeterConfig {
-  public browser: BrowserTypes = BrowserTypes.Chromium;
-  /** Browser distribution channel, eg. `"chrome"` to use an installed Chrome. */
-  public channel?: string;
-  /** Path to a browser executable to use instead of the Playwright build. */
-  public executablePath?: string;
-  public baseURL?: string;
-  public destURLs: AltimeterDestination[] = [];
-  public dir = "altimeter";
+/** Options that can be set for the whole run or overridden per destination. */
+export class AltimeterPageOptions {
   public width = 1200;
-  public height = 600;
+  public height = 630;
+  /** Pixel density of the image, eg. `2` for a 2400x1260 image at 1200x630. */
+  public deviceScaleFactor = 1;
+  public format: ImageFormat = "jpeg";
+  /** JPEG quality from 0 to 100. Ignored for PNG. */
+  public quality?: number;
   /** Load state to wait for after navigating. */
   public waitUntil: WaitUntil = "load";
   /** Selector that must be visible before the screenshot is taken. */
   public waitForSelector?: string;
   /** Extra milliseconds to wait before the screenshot is taken. */
   public delay = 0;
+  /** Capture only the first element matching this selector. */
+  public selector?: string;
+  /** Extra CSS applied while the screenshot is taken. */
+  public css?: string;
+  /** Elements hidden while the screenshot is taken, eg. cookie banners. */
+  public hideSelectors: string[] = [];
+  public colorScheme: ColorScheme = "light";
+  public reducedMotion: ReducedMotion = "reduce";
+  /** Extra HTTP headers sent with every request. */
+  public headers?: Record<string, string>;
+  public userAgent?: string;
+}
+
+export class AltimeterConfig extends AltimeterPageOptions {
+  public browser: BrowserTypes = BrowserTypes.Chromium;
+  /** Browser distribution channel, eg. `"chrome"` to use an installed Chrome. */
+  public channel?: string;
+  /** Path to a browser executable to use instead of the Playwright build. */
+  public executablePath?: string;
+  public baseURL?: string;
+  public destURLs: AltimeterDestinationInput[] = [];
+  public dir = "altimeter";
   /** Navigation / wait timeout in milliseconds (`0` disables it). */
   public timeout = 30000;
   /** Maximum number of pages captured at the same time. */
   public concurrency = 4;
+  /** Credentials for HTTP authentication, eg. on a staging site. */
+  public httpCredentials?: { username: string; password: string };
 }
 
 export class AltimeterDestination {
@@ -49,6 +74,18 @@ export class AltimeterDestination {
     this.url = url;
   }
 }
+
+/**
+ * A destination as written in a config: either a path, or an object with the
+ * path, an optional image name (derived from the path when omitted) and any
+ * page options to override for this destination.
+ */
+export type AltimeterDestinationInput =
+  | string
+  | ({ name?: string; url: string } & Partial<AltimeterPageOptions>);
+
+/** Config accepted by `genRun`; anything left out falls back to the defaults. */
+export type AltimeterOptions = Partial<AltimeterConfig>;
 
 export interface AltimeterResult {
   name: string;
@@ -69,13 +106,6 @@ export class AltimeterConfigError extends Error {
   }
 }
 
-const WAIT_UNTIL_VALUES: WaitUntil[] = [
-  "load",
-  "domcontentloaded",
-  "networkidle",
-  "commit",
-];
-
 type Check = (value: unknown) => string | undefined;
 
 const isString: Check = (v) =>
@@ -88,16 +118,41 @@ const isPositiveInt: Check = (v) =>
   Number.isInteger(v) && (v as number) > 0
     ? undefined
     : "must be a positive integer";
+const isPositiveNumber: Check = (v) =>
+  typeof v === "number" && Number.isFinite(v) && v > 0
+    ? undefined
+    : "must be a positive number";
 const isNonNegativeNumber: Check = (v) =>
   typeof v === "number" && Number.isFinite(v) && v >= 0
     ? undefined
     : "must be a non-negative number";
+const isQuality: Check = (v) =>
+  Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100
+    ? undefined
+    : "must be an integer from 0 to 100";
 const isOneOf =
   (values: readonly string[]): Check =>
   (v) =>
     values.includes(v as string)
       ? undefined
       : "must be one of " + values.map((x) => JSON.stringify(x)).join(", ");
+const isStringArray: Check = (v) =>
+  Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0)
+    ? undefined
+    : "must be an array of non-empty strings";
+const isStringRecord: Check = (v) =>
+  typeof v === "object" &&
+  v !== null &&
+  !Array.isArray(v) &&
+  Object.values(v).every((x) => typeof x === "string")
+    ? undefined
+    : "must be an object with string values";
+const isCredentials: Check = (v) => {
+  const { username, password } = (v ?? {}) as Record<string, unknown>;
+  return typeof username === "string" && typeof password === "string"
+    ? undefined
+    : "must be an object with string `username` and `password`";
+};
 const isURL: Check = (v) => {
   const err = isNonEmptyString(v);
   if (err !== undefined) {
@@ -111,21 +166,72 @@ const isURL: Check = (v) => {
   }
 };
 
+const PAGE_CHECKS: Record<keyof AltimeterPageOptions, Check> = {
+  width: isPositiveInt,
+  height: isPositiveInt,
+  deviceScaleFactor: isPositiveNumber,
+  format: isOneOf(["jpeg", "png"]),
+  quality: isQuality,
+  waitUntil: isOneOf(["load", "domcontentloaded", "networkidle", "commit"]),
+  waitForSelector: isNonEmptyString,
+  delay: isNonNegativeNumber,
+  selector: isNonEmptyString,
+  css: isString,
+  hideSelectors: isStringArray,
+  colorScheme: isOneOf(["light", "dark", "no-preference"]),
+  reducedMotion: isOneOf(["reduce", "no-preference"]),
+  headers: isStringRecord,
+  userAgent: isNonEmptyString,
+};
+
 const CHECKS: Record<keyof AltimeterConfig, Check> = {
+  ...PAGE_CHECKS,
   browser: isOneOf(Object.values(BrowserTypes)),
   channel: isNonEmptyString,
   executablePath: isNonEmptyString,
   baseURL: isURL,
   destURLs: () => undefined, // validated separately below
   dir: isString,
-  width: isPositiveInt,
-  height: isPositiveInt,
-  waitUntil: isOneOf(WAIT_UNTIL_VALUES),
-  waitForSelector: isNonEmptyString,
-  delay: isNonNegativeNumber,
   timeout: isNonNegativeNumber,
   concurrency: isPositiveInt,
+  httpCredentials: isCredentials,
 };
+
+/**
+ * Runs `checks` over the keys of `input`, returning a problem for each invalid
+ * value and passing unknown keys to `warn`.
+ */
+function checkKeys(
+  input: Record<string, unknown>,
+  checks: Record<string, Check>,
+  where: string,
+  warn: (message: string) => void,
+): string[] {
+  const known = Object.keys(checks);
+  const problems: string[] = [];
+  for (const key of Object.keys(input)) {
+    if (!known.includes(key)) {
+      const match = known.find((k) => k.toLowerCase() === key.toLowerCase());
+      warn(
+        "Unknown config key `" +
+          where +
+          key +
+          "`" +
+          (match !== undefined ? ", did you mean `" + match + "`?" : "."),
+      );
+      continue;
+    }
+    const value = input[key];
+    if (value === undefined) {
+      continue;
+    }
+    const err = checks[key](value);
+    if (err !== undefined) {
+      problems.push("`" + where + key + "` " + err);
+    }
+  }
+  return problems;
+}
 
 /**
  * Validates a raw (eg. JSON-parsed) config and merges it over the defaults.
@@ -140,41 +246,19 @@ export function parseConfig(
     throw new AltimeterConfigError(["config must be a JSON object"]);
   }
   const input = raw as Record<string, unknown>;
-  const known = Object.keys(CHECKS);
-  const problems: string[] = [];
-
-  for (const key of Object.keys(input)) {
-    if (!known.includes(key)) {
-      const match = known.find((k) => k.toLowerCase() === key.toLowerCase());
-      warn(
-        "Unknown config key `" +
-          key +
-          "`" +
-          (match !== undefined ? ", did you mean `" + match + "`?" : "."),
-      );
-      continue;
-    }
-    const value = input[key];
-    if (value === undefined) {
-      continue;
-    }
-    const err = CHECKS[key as keyof AltimeterConfig](value);
-    if (err !== undefined) {
-      problems.push("`" + key + "` " + err);
-    }
-  }
+  const problems = checkKeys(input, CHECKS, "", warn);
 
   if (input.baseURL === undefined) {
     problems.push("`baseURL` is required");
   }
-  problems.push(...checkDestinations(input.destURLs));
+  problems.push(...checkDestinations(input.destURLs, warn));
 
   if (problems.length > 0) {
     throw new AltimeterConfigError(problems);
   }
 
   const config = new AltimeterConfig();
-  for (const key of known) {
+  for (const key of Object.keys(CHECKS)) {
     if (input[key] !== undefined) {
       Object.assign(config, { [key]: input[key] });
     }
@@ -182,7 +266,10 @@ export function parseConfig(
   return config;
 }
 
-function checkDestinations(destURLs: unknown): string[] {
+function checkDestinations(
+  destURLs: unknown,
+  warn: (message: string) => void,
+): string[] {
   if (destURLs === undefined) {
     return [];
   }
@@ -192,24 +279,50 @@ function checkDestinations(destURLs: unknown): string[] {
   const problems: string[] = [];
   const seen = new Set<string>();
   destURLs.forEach((dest, i) => {
-    const where = "`destURLs[" + i + "]`";
-    if (typeof dest !== "object" || dest === null) {
-      problems.push(where + " must be an object with `name` and `url`");
+    const where = "destURLs[" + i + "]";
+    if (typeof dest === "string") {
+      dest = { url: dest };
+    } else if (typeof dest !== "object" || dest === null) {
+      problems.push("`" + where + "` must be a string or an object");
       return;
     }
-    const { name, url } = dest as Record<string, unknown>;
-    if (typeof name !== "string" || name.length === 0) {
-      problems.push(where + ".name must be a non-empty string");
-    } else if (seen.has(name)) {
-      problems.push(where + ".name `" + name + "` is used more than once");
-    } else {
-      seen.add(name);
-    }
+    const { name, url, ...options } = dest as Record<string, unknown>;
     if (typeof url !== "string") {
-      problems.push(where + ".url must be a string");
+      problems.push("`" + where + ".url` must be a string");
+      return;
     }
+    if (name !== undefined && (typeof name !== "string" || name === "")) {
+      problems.push("`" + where + ".name` must be a non-empty string");
+      return;
+    }
+    const resolved = name ?? destinationName(url);
+    if (seen.has(resolved)) {
+      problems.push(
+        "`" +
+          where +
+          "` would be saved as `" +
+          resolved +
+          "`, which is already used; give it a unique `name`",
+      );
+    }
+    seen.add(resolved);
+    problems.push(...checkKeys(options, PAGE_CHECKS, where + ".", warn));
   });
   return problems;
+}
+
+/**
+ * Derives an image name from a destination path, eg. `"docs/intro.html"`
+ * becomes `"docs-intro"` and `""` becomes `"base"`.
+ */
+export function destinationName(url: string): string {
+  const name = url
+    .replace(/[?#].*$/, "")
+    .replace(/\.html?$/i, "")
+    .replace(/(^|\/)index$/i, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return name.length > 0 ? name : "base";
 }
 
 /**
@@ -323,22 +436,48 @@ function installBrowser(browser: BrowserTypes): void {
   }
 }
 
+interface ResolvedDestination {
+  name: string;
+  url: string;
+  options: AltimeterPageOptions;
+}
+
+function resolveDestinations(config: AltimeterConfig): ResolvedDestination[] {
+  const pageKeys = Object.keys(PAGE_CHECKS) as (keyof AltimeterPageOptions)[];
+  const base: AltimeterPageOptions = Object.assign(
+    new AltimeterPageOptions(),
+    Object.fromEntries(pageKeys.map((key) => [key, config[key]])),
+  );
+  const inputs: AltimeterDestinationInput[] =
+    config.destURLs.length > 0 ? config.destURLs : [""];
+  return inputs.map((input) => {
+    const { name, url, ...overrides } =
+      typeof input === "string" ? { url: input } : input;
+    const defined = Object.entries(overrides).filter(
+      ([, value]) => value !== undefined,
+    );
+    return {
+      name: name ?? destinationName(url),
+      url,
+      options: { ...base, ...Object.fromEntries(defined) },
+    };
+  });
+}
+
 /**
- * Captures every configured destination. Failures are reported per page
+ * Captures every configured destination. Plain objects are validated with
+ * `parseConfig` and merged over the defaults. Failures are reported per page
  * instead of aborting the whole run; check `error` on the returned results.
  */
 export async function genRun(
-  config: AltimeterConfig,
+  input: AltimeterConfig | AltimeterOptions,
 ): Promise<AltimeterResult[]> {
+  const config = input instanceof AltimeterConfig ? input : parseConfig(input);
   if (config.baseURL === undefined) {
     throw new AltimeterConfigError(["`baseURL` is required"]);
   }
   const baseURL = config.baseURL;
-
-  const destinations =
-    config.destURLs.length > 0
-      ? config.destURLs
-      : [new AltimeterDestination("base", "")];
+  const destinations = resolveDestinations(config);
 
   const browser = await launchBrowser(config);
   try {
@@ -348,12 +487,7 @@ export async function genRun(
       async (destination) => {
         const url = joinURL(baseURL, destination.url);
         try {
-          const path = await genScreenShot(
-            config,
-            browser,
-            destination.name,
-            url,
-          );
+          const path = await genScreenShot(config, browser, destination, url);
           console.log("Generated " + path);
           return { name: destination.name, url, path };
         } catch (err) {
@@ -375,48 +509,86 @@ export async function genRun(
   }
 }
 
+/** Builds the stylesheet applied while a screenshot is taken. */
+export function screenshotStyle(
+  options: Pick<AltimeterPageOptions, "css" | "hideSelectors">,
+): string | undefined {
+  const rules: string[] = [];
+  if (options.hideSelectors.length > 0) {
+    rules.push(
+      options.hideSelectors.join(", ") + " { visibility: hidden !important; }",
+    );
+  }
+  if (options.css !== undefined && options.css.length > 0) {
+    rules.push(options.css);
+  }
+  return rules.length > 0 ? rules.join("\n") : undefined;
+}
+
 async function genScreenShot(
   config: AltimeterConfig,
   browser: Browser,
-  name: string,
+  destination: ResolvedDestination,
   url: string,
 ): Promise<string> {
+  const options = destination.options;
   let context: BrowserContext | undefined;
   try {
     context = await browser.newContext({
-      screen: { width: config.width, height: config.height },
+      screen: { width: options.width, height: options.height },
       viewport: {
-        width: config.width,
-        height: config.height,
+        width: options.width,
+        height: options.height,
       },
+      deviceScaleFactor: options.deviceScaleFactor,
+      colorScheme: options.colorScheme,
+      reducedMotion: options.reducedMotion,
+      extraHTTPHeaders: options.headers,
+      userAgent: options.userAgent,
+      httpCredentials: config.httpCredentials,
       isMobile: false,
     });
     context.setDefaultTimeout(config.timeout);
     const page = await context.newPage();
-    const response = await page.goto(url, { waitUntil: config.waitUntil });
+    const response = await page.goto(url, { waitUntil: options.waitUntil });
     if (response !== null && response.status() >= 400) {
       throw new Error("Page responded with HTTP " + response.status());
     }
-    if (config.waitForSelector !== undefined) {
-      await page.waitForSelector(config.waitForSelector, { state: "visible" });
+    if (options.waitForSelector !== undefined) {
+      await page.waitForSelector(options.waitForSelector, {
+        state: "visible",
+      });
     }
-    if (config.delay > 0) {
-      await page.waitForTimeout(config.delay);
+    if (options.delay > 0) {
+      await page.waitForTimeout(options.delay);
     }
 
-    const path = normalizeDir(config.dir) + name + ".jpg";
-    await page.screenshot({
-      animations: "disabled",
-      fullPage: false,
-      type: "jpeg",
+    const extension = options.format === "png" ? ".png" : ".jpg";
+    const path = normalizeDir(config.dir) + destination.name + extension;
+    const screenshotOptions = {
+      animations: "disabled" as const,
+      type: options.format,
+      quality: options.format === "jpeg" ? options.quality : undefined,
+      style: screenshotStyle(options),
       path,
-      clip: {
-        x: 0,
-        y: 0,
-        width: config.width,
-        height: config.height,
-      },
-    });
+    };
+    if (options.selector !== undefined) {
+      await page
+        .locator(options.selector)
+        .first()
+        .screenshot(screenshotOptions);
+    } else {
+      await page.screenshot({
+        ...screenshotOptions,
+        fullPage: false,
+        clip: {
+          x: 0,
+          y: 0,
+          width: options.width,
+          height: options.height,
+        },
+      });
+    }
     return path;
   } finally {
     await context?.close();

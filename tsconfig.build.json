@@ -1,8 +1,7 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": [
-    "bin/**/*",
-    "dist/**/*",
-    "**/*.test.ts"
-  ]
+  "compilerOptions": {
+    "emitDeclarationOnly": true
+  },
+  "exclude": ["bin/**/*", "dist/**/*", "**/*.test.ts"]
 }
