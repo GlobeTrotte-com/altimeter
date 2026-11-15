@@ -28,16 +28,36 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
-      # Skip lifecycle scripts so the Playwright browser download in
-      # `postinstall` does not run; the unit tests do not launch a browser.
+      # Skip lifecycle scripts; the browser for the browser tests is
+      # installed in its own step below.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
       - name: Lint
         run: npm run lint
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Build
         run: npm run build
 
-      - name: Test
-        run: npm test
+      # Uses the CLI from the pinned playwright-core so the browser matches.
+      - name: Install Chromium for browser tests
+        run: npx playwright-core install --with-deps chromium --only-shell
+
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e '
+              const t = require("./coverage/coverage-summary.json").total;
+              const row = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
+              console.log("### Coverage (Node ${{ matrix.node-version }})\n");
+              console.log("| Metric | Covered | Count |\n| --- | --- | --- |");
+              ["statements", "branches", "functions", "lines"].forEach((k) => console.log(row(k)));
+            ' >> "$GITHUB_STEP_SUMMARY"
+          fi

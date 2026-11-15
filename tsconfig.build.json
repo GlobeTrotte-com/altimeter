@@ -3,5 +3,11 @@
   "compilerOptions": {
     "emitDeclarationOnly": true
   },
-  "exclude": ["bin/**/*", "dist/**/*", "**/*.test.ts"]
+  "exclude": [
+    "bin/**/*",
+    "dist/**/*",
+    "test/**/*",
+    "**/*.test.ts",
+    "vitest.config.ts"
+  ]
 }
