@@ -1,14 +1,31 @@
 name: Release
 
-# On every push to main, release-please opens or updates a release PR with
-# the next version and CHANGELOG entries, worked out from conventional commit
-# messages (feat: -> minor, fix: -> patch while below 1.0). Merging that PR
-# tags the release, creates the GitHub Release and publishes to npm.
+# Every Tuesday this checks what merged to main since the last release tag
+# (see scripts/release-plan.ts):
+#   - nothing, or only CI / test / dev tooling changes: no release that week
+#   - only Dependabot updates to runtime dependencies: patch (0.1.0 -> 0.1.1)
+#   - any other change to the package: minor (0.1.0 -> 0.2.0)
+# It then runs the full test suite, publishes to npm with provenance, tags the
+# release and creates the GitHub Release with notes from the merged PR titles.
+#
+# Run it by hand from the Actions tab to release now, force a bump size, or
+# preview the plan with "dry run".
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    # Tuesdays 17:00 UTC, after Monday's Dependabot updates have merged.
+    - cron: "0 17 * * 2"
   workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (auto picks it from what merged)
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      dry_run:
+        description: Only show what would be released
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,44 +35,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
-    name: Release PR
+  plan:
+    name: Plan release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+      notes: ${{ steps.plan.outputs.notes }}
     steps:
-      # RELEASE_PLEASE_TOKEN (a GitHub App or fine-grained token with contents
-      # and pull requests write access) lets CI run on the release PR. PRs
-      # opened with the default GITHUB_TOKEN don't trigger other workflows,
-      # so without it the release PR can't pass the required checks.
-      - name: Run release-please
-        id: release
-        uses: googleapis/release-please-action@v4
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Plan release
+        id: plan
+        run: node scripts/release-plan.ts
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
 
   publish:
     name: Publish to npm
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: plan
+    if: >-
+      needs.plan.outputs.release == 'true' &&
+      inputs.dry_run != true &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: npm
     permissions:
-      contents: read
+      # Tag the release and create the GitHub Release.
+      contents: write
       # Lets npm trusted publishing exchange the workflow's identity for a
       # short-lived publish token and attach provenance. No NPM_TOKEN needed.
       id-token: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - name: Checkout ${{ needs.release-please.outputs.tag_name }}
+      - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -83,7 +109,19 @@ jobs:
       - name: Test with coverage
         run: npm run test:coverage
 
+      # The version lives in the release tags; package.json in the repo keeps
+      # a placeholder, so nothing has to be committed back to main.
+      - name: Set version ${{ env.VERSION }}
+        run: npm version "$VERSION" --no-git-tag-version
+
       # prepublishOnly builds the package and takes a real screenshot with
       # the built CLI before anything is uploaded.
       - name: Publish
         run: npm publish --provenance --access public
+
+      - name: Create GitHub Release
+        run: gh release create "v$VERSION" --target "$SHA" --title "v$VERSION" --notes "$NOTES"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          NOTES: ${{ needs.plan.outputs.notes }}

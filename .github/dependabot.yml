@@ -5,8 +5,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
-    # fix(deps) makes runtime updates (eg. playwright-core) ship in the next
-    # patch release; chore(deps-dev) updates to dev tooling don't release.
+    # The weekly release reads these titles: runtime updates (fix(deps), eg.
+    # playwright-core) ship as a patch release, while dev tooling updates
+    # (chore(deps-dev)) don't release on their own.
     commit-message:
       prefix: fix
       prefix-development: chore

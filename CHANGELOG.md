@@ -1,5 +1,7 @@
 # Changelog
 
+Releases after 0.1.0 are listed on [GitHub Releases](https://github.com/GlobeTrotte-com/altimeter/releases).
+
 ## [0.1.0](https://github.com/GlobeTrotte-com/altimeter/compare/v0.0.5...v0.1.0) (2026-11-15)
 
 
