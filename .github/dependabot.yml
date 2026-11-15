@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # fix(deps) makes runtime updates (eg. playwright-core) ship in the next
+    # patch release; chore(deps-dev) updates to dev tooling don't release.
+    commit-message:
+      prefix: fix
+      prefix-development: chore
+      include: scope
     groups:
       # Bundle low-risk dev tooling bumps into a single PR.
       dev-dependencies:
@@ -18,3 +24,5 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci

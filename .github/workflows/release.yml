@@ -1,0 +1,89 @@
+name: Release
+
+# On every push to main, release-please opens or updates a release PR with
+# the next version and CHANGELOG entries, worked out from conventional commit
+# messages (feat: -> minor, fix: -> patch while below 1.0). Merging that PR
+# tags the release, creates the GitHub Release and publishes to npm.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # RELEASE_PLEASE_TOKEN (a GitHub App or fine-grained token with contents
+      # and pull requests write access) lets CI run on the release PR. PRs
+      # opened with the default GITHUB_TOKEN don't trigger other workflows,
+      # so without it the release PR can't pass the required checks.
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish to npm
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      # Lets npm trusted publishing exchange the workflow's identity for a
+      # short-lived publish token and attach provenance. No NPM_TOKEN needed.
+      id-token: write
+    steps:
+      - name: Checkout ${{ needs.release-please.outputs.tag_name }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Update npm
+        run: npm install -g npm@11
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Install Chromium
+        run: npx playwright-core install --with-deps chromium --only-shell
+
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      # prepublishOnly builds the package and takes a real screenshot with
+      # the built CLI before anything is uploaded.
+      - name: Publish
+        run: npm publish --provenance --access public
