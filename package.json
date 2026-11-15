@@ -24,7 +24,9 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && npm run esbuild",
     "esbuild": "esbuild --bundle --platform=node --packages=external ./cli.ts ./index.ts --outdir=dist --allow-overwrite",
     "lint": "eslint \"**/*.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build && ./bin/cli.js doc/config.json"
   },
@@ -32,12 +34,19 @@
     "type": "git",
     "url": "https://github.com/GlobeTrotte-com/altimeter.git"
   },
-  "keywords": ["altimeter", "preview", "screenshot", "link", "image"],
+  "keywords": [
+    "altimeter",
+    "preview",
+    "screenshot",
+    "link",
+    "image"
+  ],
   "dependencies": {
     "playwright-core": "1.65.1"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
+    "@vitest/coverage-v8": "5.1.0",
     "esbuild": "0.28.2",
     "eslint": "10.15.0",
     "typescript": "6.0.3",

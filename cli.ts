@@ -1,8 +1,12 @@
 import { existsSync, readFileSync } from "fs";
 import { dirname, relative, resolve } from "path";
-import { exit } from "process";
 import { parseArgs } from "util";
-import { genRun, parseConfig, AltimeterConfig, AltimeterConfigError } from ".";
+import {
+  genRun,
+  parseConfig,
+  AltimeterConfig,
+  AltimeterConfigError,
+} from "./index";
 
 const DEFAULT_CONFIG = "altimeter.config.json";
 
@@ -59,8 +63,15 @@ function readConfig(path: string): Record<string, unknown> {
   return raw;
 }
 
-async function main(): Promise<number> {
+/**
+ * Runs the CLI with the given arguments (without the node binary and script
+ * path) and resolves with the process exit code.
+ */
+export async function main(
+  args: string[] = process.argv.slice(2),
+): Promise<number> {
   const { values, positionals } = parseArgs({
+    args,
     allowPositionals: true,
     options: {
       help: { type: "boolean", short: "h" },
@@ -119,7 +130,8 @@ async function main(): Promise<number> {
   return 0;
 }
 
-main().then(exit, (err) => {
+/** Prints the error the way the CLI reports it and returns the exit code. */
+export function reportError(err: unknown): number {
   if (err instanceof AltimeterConfigError) {
     console.error(err.message);
   } else if (
@@ -131,5 +143,13 @@ main().then(exit, (err) => {
   } else {
     console.error(err);
   }
-  exit(1);
-});
+  return 1;
+}
+
+/** Entry point used by `bin/cli.js`. */
+export function run(args?: string[]): Promise<void> {
+  return main(args).then(
+    (code) => process.exit(code),
+    (err) => process.exit(reportError(err)),
+  );
+}
