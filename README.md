@@ -262,10 +262,12 @@ The browser tests in `browser.test.ts` drive a real headless Chromium and run wh
 
 ## Releasing
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please):
+Releases are automatic. Every Tuesday, the [Release workflow](.github/workflows/release.yml) looks at what merged to `main` since the last release:
 
-1. PR titles follow [Conventional Commits](https://www.conventionalcommits.org/) (checked in CI). `feat:` makes a minor release and `fix:` a patch release; other types (`chore:`, `docs:`, `test:`, `ci:` ...) don't release on their own.
-2. After each merge to `main`, release-please opens or updates a release PR with the next version and the `CHANGELOG.md` entries.
-3. Merging the release PR tags the version, creates the GitHub Release and publishes to npm with provenance, after lint, typecheck, tests and a real screenshot pass.
+- **Nothing, or only CI, test or dev tooling changes:** no release that week.
+- **Only Dependabot updates to runtime dependencies (eg. `playwright-core`):** a patch release, eg. 0.1.0 to 0.1.1.
+- **Any other change to the package:** a minor release, eg. 0.1.0 to 0.2.0.
 
-Dependabot's runtime dependency updates (eg. `playwright-core`) are titled `fix(deps): ...`, so they ship in the next patch release.
+It runs lint, typecheck and the full test suite (including a real screenshot), publishes to npm with provenance, tags `vX.Y.Z` and creates the GitHub Release with the merged PR titles as notes. The version comes from the latest tag, so `package.json` in the repo keeps a placeholder version.
+
+To release right away, force a bump size (eg. `major`) or preview what would be released, run the workflow from the Actions tab and pick the options.
