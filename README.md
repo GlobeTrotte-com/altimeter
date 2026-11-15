@@ -248,3 +248,24 @@ for (const { name, path, error } of results) {
 ```
 
 `genRun` accepts the same options as the config file (missing ones use the defaults, and the options are validated the same way) and never throws for a single page failing; check `error` on each result instead. Unlike the CLI, relative paths are resolved from the current working directory.
+
+## Development
+
+```sh
+npm ci
+npm run lint && npm run typecheck && npm run build
+npm test                # unit tests
+npm run test:coverage   # with coverage; fails below the minimums in vitest.config.ts
+```
+
+The browser tests in `browser.test.ts` drive a real headless Chromium and run when `CI` is set. To run them locally, install the browser once with `npx playwright-core install chromium --only-shell`, then run `CI=1 npm test`.
+
+## Releasing
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please):
+
+1. PR titles follow [Conventional Commits](https://www.conventionalcommits.org/) (checked in CI). `feat:` makes a minor release and `fix:` a patch release; other types (`chore:`, `docs:`, `test:`, `ci:` ...) don't release on their own.
+2. After each merge to `main`, release-please opens or updates a release PR with the next version and the `CHANGELOG.md` entries.
+3. Merging the release PR tags the version, creates the GitHub Release and publishes to npm with provenance, after lint, typecheck, tests and a real screenshot pass.
+
+Dependabot's runtime dependency updates (eg. `playwright-core`) are titled `fix(deps): ...`, so they ship in the next patch release.
