@@ -265,8 +265,8 @@ The browser tests in `browser.test.ts` drive a real headless Chromium and run wh
 Releases are automatic. Every Tuesday, the [Release workflow](.github/workflows/release.yml) looks at what merged to `main` since the last release:
 
 - **Nothing, or only CI, test or dev tooling changes:** no release that week.
-- **Only Dependabot updates to runtime dependencies (eg. `playwright-core`):** a patch release, eg. 0.1.0 to 0.1.1.
-- **Any other change to the package:** a minor release, eg. 0.1.0 to 0.2.0.
+- **Only docs, build config, `package.json` metadata or Dependabot updates to runtime dependencies (eg. `playwright-core`):** a patch release, eg. 0.1.0 to 0.1.1.
+- **Code changes, or changes to `package.json` dependencies or entry points:** a minor release, eg. 0.1.0 to 0.2.0.
 
 It runs lint, typecheck and the full test suite (including a real screenshot), publishes to npm with provenance, tags `vX.Y.Z` and creates the GitHub Release with the merged PR titles as notes. The version comes from the latest tag, so `package.json` in the repo keeps a placeholder version.
 

@@ -16,6 +16,8 @@ export interface Commit {
   author: string;
   subject: string;
   files: string[];
+  /** package.json before and after the commit, when the commit changed it. */
+  packageJson?: { before?: string; after?: string };
 }
 
 export interface ReleasePlan {
@@ -26,6 +28,8 @@ export interface ReleasePlan {
   version?: string;
   notes?: string;
 }
+
+type Level = "minor" | "patch" | undefined;
 
 const DEPENDABOT = "dependabot[bot]";
 
@@ -42,25 +46,95 @@ const DEV_ONLY = [
   /^vitest\.config\.ts$/,
   /^eslint\.config\.js$/,
   /^CHANGELOG\.md$/,
+  /^release-please-config\.json$/, // release tooling, removed after 0.1.0
+  // npm doesn't publish the lockfile; dependency changes show in package.json.
+  /^package-lock\.json$/,
 ];
+
+// Docs and build config: worth shipping, but not new behaviour.
+const PATCH_ONLY = [
+  /^README\.md$/,
+  /^LICENSE$/,
+  /^doc\//,
+  /^tsconfig(\.[^/]*)?\.json$/,
+];
+
+// package.json fields that change what users install or import. Changing any
+// of them counts like a code change; other fields (version, description,
+// keywords, scripts ...) count like docs and build config.
+const PACKAGE_FIELDS = [
+  "dependencies",
+  "peerDependencies",
+  "optionalDependencies",
+  "bundleDependencies",
+  "main",
+  "module",
+  "types",
+  "exports",
+  "bin",
+  "files",
+  "engines",
+  "type",
+];
+
+// package.json fields that only affect development.
+const DEV_FIELDS = ["devDependencies", "overrides"];
 
 export function isDevOnly(path: string): boolean {
   return DEV_ONLY.some((pattern) => pattern.test(path));
 }
 
+export function isPatchOnly(path: string): boolean {
+  return PATCH_ONLY.some((pattern) => pattern.test(path));
+}
+
+function parse(json: string | undefined): Record<string, unknown> {
+  return json === undefined ? {} : JSON.parse(json);
+}
+
+/** How a change to package.json affects the next release. */
+export function classifyPackageJson(before?: string, after?: string): Level {
+  const old = parse(before);
+  const next = parse(after);
+  const changed = [...new Set([...Object.keys(old), ...Object.keys(next)])]
+    .filter((key) => JSON.stringify(old[key]) !== JSON.stringify(next[key]));
+  if (before === undefined || changed.some((k) => PACKAGE_FIELDS.includes(k))) {
+    return "minor";
+  }
+  return changed.some((k) => !DEV_FIELDS.includes(k)) ? "patch" : undefined;
+}
+
+function max(a: Level, b: Level): Level {
+  return a === "minor" || b === "minor" ? "minor" : (a ?? b);
+}
+
 /**
- * How a merged commit affects the next release: Dependabot updates to
- * runtime dependencies are a patch, any other change to the package is a
- * minor bump, and changes to CI, tests or dev tooling alone don't release.
+ * How a merged commit affects the next release:
+ * - Dependabot: runtime dependency updates are a patch; dev tooling updates
+ *   don't release.
+ * - Anyone else: code and package changes (exports, dependencies ...) are a
+ *   minor bump; docs, build config and package.json metadata only are a
+ *   patch.
+ * - Changes to CI, tests or dev tooling alone don't release.
  */
-export function classify(commit: Commit): "minor" | "patch" | undefined {
-  if (commit.files.length === 0 || commit.files.every(isDevOnly)) {
+export function classify(commit: Commit): Level {
+  const files = commit.files.filter((f) => !isDevOnly(f));
+  if (files.length === 0) {
     return undefined;
   }
   if (commit.author === DEPENDABOT) {
     return DEV_DEPENDENCY.test(commit.subject) ? undefined : "patch";
   }
-  return "minor";
+  let level: Level;
+  for (const file of files) {
+    if (file === "package.json") {
+      const { before, after } = commit.packageJson ?? {};
+      level = max(level, classifyPackageJson(before, after));
+    } else {
+      level = max(level, isPatchOnly(file) ? "patch" : "minor");
+    }
+  }
+  return level;
 }
 
 export function nextVersion(current: string, bump: Bump): string {
@@ -100,16 +174,16 @@ export function planRelease(
   commits: Commit[],
   bumpInput: BumpInput = "auto",
 ): ReleasePlan {
-  const changes = commits.filter((c) => classify(c) === "minor");
-  const dependencies = commits.filter((c) => classify(c) === "patch");
+  const releasing = commits.filter((c) => classify(c) !== undefined);
+  const changes = releasing.filter((c) => c.author !== DEPENDABOT);
+  const dependencies = releasing.filter((c) => c.author === DEPENDABOT);
+  const level = releasing.map(classify).reduce(max, undefined);
 
   let bump: Bump;
   if (bumpInput !== "auto") {
     bump = bumpInput;
-  } else if (changes.length > 0) {
-    bump = "minor";
-  } else if (dependencies.length > 0) {
-    bump = "patch";
+  } else if (level !== undefined) {
+    bump = level;
   } else {
     return {
       release: false,
@@ -152,15 +226,30 @@ export function readCommits(tag: string): Commit[] {
   }
   return log.split("\n").map((line) => {
     const [sha, author, subject] = line.split("\x1f");
-    const files = git(
-      "diff-tree",
-      "--no-commit-id",
-      "--name-only",
-      "-r",
-      sha,
-    ).split("\n");
-    return { sha, author, subject, files: files.filter((f) => f !== "") };
+    const files = git("diff-tree", "--no-commit-id", "--name-only", "-r", sha)
+      .split("\n")
+      .filter((f) => f !== "");
+    const commit: Commit = { sha, author, subject, files };
+    if (files.includes("package.json")) {
+      commit.packageJson = {
+        before: show(sha + "^:package.json"),
+        after: show(sha + ":package.json"),
+      };
+    }
+    return commit;
   });
+}
+
+/** Reads a file at a revision, or undefined when it doesn't exist there. */
+function show(spec: string): string | undefined {
+  try {
+    return execFileSync("git", ["show", spec], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function main(): void {
