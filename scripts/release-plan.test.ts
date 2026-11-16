@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   classify,
+  classifyPackageJson,
   Commit,
   isDevOnly,
+  isPatchOnly,
   nextVersion,
   planRelease,
 } from "./release-plan";
@@ -28,6 +30,8 @@ describe("isDevOnly", () => {
     ".gitignore",
     ".release-please-manifest.json",
     "CHANGELOG.md",
+    "package-lock.json",
+    "release-please-config.json",
   ])("treats %s as dev only", (path) => {
     expect(isDevOnly(path)).toBe(true);
   });
@@ -40,13 +44,81 @@ describe("isDevOnly", () => {
   );
 });
 
+describe("isPatchOnly", () => {
+  it.each([
+    "README.md",
+    "LICENSE",
+    "doc/config.json",
+    "tsconfig.json",
+    "tsconfig.build.json",
+  ])("treats %s as docs or build config", (path) => {
+    expect(isPatchOnly(path)).toBe(true);
+  });
+
+  it.each(["index.ts", "cli.ts", "bin/cli.js", "package.json"])(
+    "treats %s as code",
+    (path) => {
+      expect(isPatchOnly(path)).toBe(false);
+    },
+  );
+});
+
+const pkg = (fields: Record<string, unknown>) =>
+  JSON.stringify({ name: "@globetrotte/altimeter", version: "0.0.0", ...fields });
+
+describe("classifyPackageJson", () => {
+  it("makes changes to what users install or import a minor bump", () => {
+    const before = pkg({ dependencies: { "playwright-core": "^1.65.1" } });
+    for (const fields of [
+      { dependencies: { "playwright-core": "^1.66.0" } },
+      { dependencies: {}, peerDependencies: { "playwright-core": "*" } },
+      { dependencies: { "playwright-core": "^1.65.1" }, main: "dist/x.js" },
+      { dependencies: { "playwright-core": "^1.65.1" }, bin: { a: "a.js" } },
+      { dependencies: { "playwright-core": "^1.65.1" }, engines: { node: ">=24" } },
+    ]) {
+      expect(classifyPackageJson(before, pkg(fields))).toBe("minor");
+    }
+  });
+
+  it("makes a new package.json a minor bump", () => {
+    expect(classifyPackageJson(undefined, pkg({}))).toBe("minor");
+  });
+
+  it("makes metadata and script changes a patch", () => {
+    expect(
+      classifyPackageJson(pkg({ keywords: ["a"] }), pkg({ keywords: ["a", "b"] })),
+    ).toBe("patch");
+    expect(
+      classifyPackageJson(
+        pkg({ scripts: { test: "vitest" } }),
+        pkg({ scripts: { test: "vitest run" }, version: "0.0.0-development" }),
+      ),
+    ).toBe("patch");
+  });
+
+  it("ignores dev dependency and override changes", () => {
+    expect(
+      classifyPackageJson(
+        pkg({ devDependencies: { vitest: "^4" } }),
+        pkg({ devDependencies: { vitest: "^5" }, overrides: { minimatch: "^11" } }),
+      ),
+    ).toBeUndefined();
+    expect(classifyPackageJson(pkg({}), pkg({}))).toBeUndefined();
+  });
+});
+
 describe("classify", () => {
   it("makes runtime dependency updates from Dependabot a patch", () => {
     expect(classify(dependabot("fix(deps): bump playwright-core"))).toBe(
       "patch",
     );
     expect(
-      classify(dependabot("build(deps): bump playwright-core", ["package-lock.json"])),
+      classify(
+        dependabot("build(deps): bump playwright-core", [
+          "package.json",
+          "package-lock.json",
+        ]),
+      ),
     ).toBe("patch");
   });
 
@@ -59,13 +131,57 @@ describe("classify", () => {
     expect(
       classify(dependabot("build(deps): bump actions/setup-node", [".github/x.yml"])),
     ).toBeUndefined();
+    expect(
+      classify(dependabot("build(deps): bump minimatch", ["package-lock.json"])),
+    ).toBeUndefined();
   });
 
-  it("makes any other change to the package a minor bump", () => {
+  it("makes code changes a minor bump", () => {
     expect(classify(commit("Add --full-page", ["index.ts", "cli.test.ts"]))).toBe(
       "minor",
     );
-    expect(classify(commit("Fix README typo", ["README.md"]))).toBe("minor");
+    expect(classify(commit("Docs and code", ["README.md", "cli.ts"]))).toBe(
+      "minor",
+    );
+  });
+
+  it("makes docs and build config changes a patch", () => {
+    expect(classify(commit("Fix README typo", ["README.md"]))).toBe("patch");
+    expect(
+      classify(commit("Tighten build", ["tsconfig.build.json", "doc/config.json"])),
+    ).toBe("patch");
+  });
+
+  it("checks which package.json fields changed", () => {
+    const metadata = {
+      ...commit("Weekly releases", ["package.json", "README.md", "scripts/x.ts"]),
+      packageJson: {
+        before: pkg({ version: "0.1.0", scripts: {} }),
+        after: pkg({ version: "0.0.0-development", scripts: { x: "y" } }),
+      },
+    };
+    expect(classify(metadata)).toBe("patch");
+
+    const dependency = {
+      ...commit("Add sharp", ["package.json", "package-lock.json"]),
+      packageJson: {
+        before: pkg({ dependencies: {} }),
+        after: pkg({ dependencies: { sharp: "^1" } }),
+      },
+    };
+    expect(classify(dependency)).toBe("minor");
+
+    const devTooling = {
+      ...commit("Bump vitest", ["package.json", "package-lock.json"]),
+      packageJson: {
+        before: pkg({ devDependencies: { vitest: "^4" } }),
+        after: pkg({ devDependencies: { vitest: "^5" } }),
+      },
+    };
+    expect(classify(devTooling)).toBeUndefined();
+
+    // Without the file contents, assume the worst.
+    expect(classify(commit("Unknown", ["package.json"]))).toBe("minor");
   });
 
   it("ignores changes to CI, tests and dev tooling only", () => {
@@ -119,7 +235,17 @@ describe("planRelease", () => {
     expect(plan.notes).not.toContain("## Changes");
   });
 
-  it("bumps the minor number when anything else merged", () => {
+  it("bumps the patch number for docs and build config changes", () => {
+    const plan = planRelease("0.1.0", [
+      commit("Clarify the README (#46)", ["README.md"]),
+      dependabot("fix(deps): bump playwright-core (#47)"),
+    ]);
+    expect(plan).toMatchObject({ release: true, bump: "patch", version: "0.1.1" });
+    expect(plan.notes).toContain("## Changes\n\n- Clarify the README (#46)");
+    expect(plan.notes).toContain("## Dependency updates");
+  });
+
+  it("bumps the minor number when code changed", () => {
     const plan = planRelease("0.1.4", [
       dependabot("fix(deps): bump playwright-core (#60)"),
       commit("Add a --full-page flag (#61)", ["index.ts", "cli.ts"]),
