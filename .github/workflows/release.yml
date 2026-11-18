@@ -1,10 +1,12 @@
 name: Release
 
-# Every Tuesday this checks what merged to main since the last release tag
+# Every Wednesday this checks what merged to main since the last release tag
 # (see scripts/release-plan.ts):
 #   - nothing, or only CI / test / dev tooling changes: no release that week
-#   - only Dependabot updates to runtime dependencies: patch (0.1.0 -> 0.1.1)
-#   - any other change to the package: minor (0.1.0 -> 0.2.0)
+#   - only docs, build config, package.json metadata or Dependabot updates to
+#     runtime dependencies: patch (0.1.0 -> 0.1.1)
+#   - code changes, or package.json dependency or entry point changes:
+#     minor (0.1.0 -> 0.2.0)
 # It then runs the full test suite, publishes to npm with provenance, tags the
 # release and creates the GitHub Release with notes from the merged PR titles.
 #
@@ -13,8 +15,11 @@ name: Release
 
 on:
   schedule:
-    # Tuesdays 17:00 UTC, after Monday's Dependabot updates have merged.
-    - cron: "0 17 * * 2"
+    # Wednesdays 17:17 UTC (9:17 AM Pacific in winter), after Monday's
+    # Dependabot updates have merged. Off the hour on purpose: GitHub delays
+    # and sometimes drops scheduled runs at the top of the hour, which is what
+    # happened to the first Tuesday 17:00 run.
+    - cron: "17 17 * * 3"
   workflow_dispatch:
     inputs:
       bump:
