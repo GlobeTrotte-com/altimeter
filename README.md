@@ -262,7 +262,7 @@ The browser tests in `browser.test.ts` drive a real headless Chromium and run wh
 
 ## Releasing
 
-Releases are automatic. Every Tuesday, the [Release workflow](.github/workflows/release.yml) looks at what merged to `main` since the last release:
+Releases are automatic. Every Wednesday, the [Release workflow](.github/workflows/release.yml) looks at what merged to `main` since the last release:
 
 - **Nothing, or only CI, test or dev tooling changes:** no release that week.
 - **Only docs, build config, `package.json` metadata or Dependabot updates to runtime dependencies (eg. `playwright-core`):** a patch release, eg. 0.1.0 to 0.1.1.
