@@ -15,11 +15,12 @@ name: Release
 
 on:
   schedule:
-    # Wednesdays 17:17 UTC (9:17 AM Pacific in winter), after Monday's
-    # Dependabot updates have merged. Off the hour on purpose: GitHub delays
-    # and sometimes drops scheduled runs at the top of the hour, which is what
-    # happened to the first Tuesday 17:00 run.
-    - cron: "17 17 * * 3"
+    # Wednesdays 08:17 UTC (12:17 AM Pacific in winter), after Monday's
+    # Dependabot updates have merged. GitHub queues scheduled runs and starts
+    # them late when Actions is busy: the 17:00 and 17:17 UTC slots (US
+    # morning) started 6 to 7 hours late two weeks running. This slot is off
+    # the hour and outside US working hours, when the queue is shortest.
+    - cron: "17 8 * * 3"
   workflow_dispatch:
     inputs:
       bump:
